@@ -274,18 +274,9 @@ static void spi_qup_fifo_write(struct spi_qup *controller,
 	}
 }
 
-static void spi_qup_dma_done(void *data)
-{
-	struct spi_qup *qup = data;
-
-	complete(&qup->done);
-}
-
 static int spi_qup_prep_sg(struct spi_master *master, struct spi_transfer *xfer,
-			   enum dma_transfer_direction dir,
-			   dma_async_tx_callback callback)
+			   enum dma_transfer_direction dir)
 {
-	struct spi_qup *qup = spi_master_get_devdata(master);
 	unsigned long flags = DMA_PREP_INTERRUPT | DMA_PREP_FENCE;
 	struct dma_async_tx_descriptor *desc;
 	struct scatterlist *sgl;
@@ -307,8 +298,8 @@ static int spi_qup_prep_sg(struct spi_master *master, struct spi_transfer *xfer,
 	if (!desc)
 		return -EINVAL;
 
-	desc->callback = callback;
-	desc->callback_param = qup;
+	desc->callback = NULL;
+	desc->callback_param = NULL;
 
 	cookie = dmaengine_submit(desc);
 
@@ -326,16 +317,10 @@ static void spi_qup_dma_terminate(struct spi_master *master,
 
 static int spi_qup_do_dma(struct spi_master *master, struct spi_transfer *xfer)
 {
-	dma_async_tx_callback rx_done = NULL, tx_done = NULL;
 	int ret;
 
-	if (xfer->rx_buf)
-		rx_done = spi_qup_dma_done;
-	else if (xfer->tx_buf)
-		tx_done = spi_qup_dma_done;
-
 	if (xfer->rx_buf) {
-		ret = spi_qup_prep_sg(master, xfer, DMA_DEV_TO_MEM, rx_done);
+		ret = spi_qup_prep_sg(master, xfer, DMA_DEV_TO_MEM);
 		if (ret)
 			return ret;
 
@@ -343,7 +328,7 @@ static int spi_qup_do_dma(struct spi_master *master, struct spi_transfer *xfer)
 	}
 
 	if (xfer->tx_buf) {
-		ret = spi_qup_prep_sg(master, xfer, DMA_MEM_TO_DEV, tx_done);
+		ret = spi_qup_prep_sg(master, xfer, DMA_MEM_TO_DEV);
 		if (ret)
 			return ret;
 
@@ -424,7 +409,14 @@ static irqreturn_t spi_qup_qup_irq(int irq, void *dev_id)
 		error = -EIO;
 	}
 
-	if (!controller->use_dma) {
+	if (controller->use_dma) {
+		if (opflags & QUP_OP_IN_SERVICE_FLAG &&
+		    opflags & QUP_OP_MAX_INPUT_DONE_FLAG)
+			complete(&controller->done);
+		if (opflags & QUP_OP_OUT_SERVICE_FLAG &&
+		    opflags & QUP_OP_MAX_OUTPUT_DONE_FLAG)
+			complete(&controller->done);
+	} else {
 		if (opflags & QUP_OP_IN_SERVICE_FLAG)
 			spi_qup_fifo_read(controller, xfer);
 
