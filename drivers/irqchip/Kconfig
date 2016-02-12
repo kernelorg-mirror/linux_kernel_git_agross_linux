@@ -120,6 +120,15 @@ config OR1K_PIC
 	bool
 	select IRQ_DOMAIN
 
+config QCOM_MPM
+        bool
+        depends on ARCH_QCOM
+	select IRQ_DOMAIN
+	select IRQ_DOMAIN_HIERARCHY
+        help
+          QCOM MSM Power Manager driver to manage and configure wakeup
+          irq generation
+
 config OMAP_IRQCHIP
 	bool
 	select GENERIC_IRQ_CHIP
