@@ -23,6 +23,7 @@
 #include <linux/pinctrl/pinmux.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinconf-generic.h>
+#include <linux/of_irq.h>
 #include <linux/slab.h>
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
@@ -578,6 +579,8 @@ static void msm_gpio_irq_mask(struct irq_data *d)
 	clear_bit(d->hwirq, pctrl->enabled_irqs);
 
 	spin_unlock_irqrestore(&pctrl->lock, flags);
+
+	irq_chip_mask_parent(d);
 }
 
 static void msm_gpio_irq_unmask(struct irq_data *d)
@@ -603,6 +606,8 @@ static void msm_gpio_irq_unmask(struct irq_data *d)
 	set_bit(d->hwirq, pctrl->enabled_irqs);
 
 	spin_unlock_irqrestore(&pctrl->lock, flags);
+
+	irq_chip_unmask_parent(d);
 }
 
 static void msm_gpio_irq_ack(struct irq_data *d)
@@ -716,6 +721,8 @@ static int msm_gpio_irq_set_type(struct irq_data *d, unsigned int type)
 
 	spin_unlock_irqrestore(&pctrl->lock, flags);
 
+	irq_chip_set_type_parent(d, type);
+
 	if (type & (IRQ_TYPE_LEVEL_LOW | IRQ_TYPE_LEVEL_HIGH))
 		irq_set_handler_locked(d, handle_level_irq);
 	else if (type & (IRQ_TYPE_EDGE_FALLING | IRQ_TYPE_EDGE_RISING))
@@ -736,8 +743,34 @@ static int msm_gpio_irq_set_wake(struct irq_data *d, unsigned int on)
 
 	spin_unlock_irqrestore(&pctrl->lock, flags);
 
+	irq_chip_set_wake_parent(d, on);
 	return 0;
 }
+
+static int msm_gpiochip_irq_reqres(struct irq_data *d)
+{
+	struct gpio_chip *chip = irq_data_get_irq_chip_data(d);
+
+	if (!try_module_get(chip->owner))
+		return -ENODEV;
+
+	if (gpiochip_lock_as_irq(chip, d->hwirq)) {
+		pr_err("unable to lock HW IRQ %lu for IRQ\n",
+			d->hwirq);
+		module_put(chip->owner);
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static void msm_gpiochip_irq_relres(struct irq_data *d)
+{
+	struct gpio_chip *chip = irq_data_get_irq_chip_data(d);
+
+	gpiochip_unlock_as_irq(chip, d->hwirq);
+	module_put(chip->owner);
+}
+
 
 static struct irq_chip msm_gpio_irq_chip = {
 	.name           = "msmgpio",
@@ -746,6 +779,65 @@ static struct irq_chip msm_gpio_irq_chip = {
 	.irq_ack        = msm_gpio_irq_ack,
 	.irq_set_type   = msm_gpio_irq_set_type,
 	.irq_set_wake   = msm_gpio_irq_set_wake,
+	.irq_request_resources	= msm_gpiochip_irq_reqres,
+	.irq_release_resources	= msm_gpiochip_irq_relres,
+};
+
+static void msm_gpio_domain_map(struct irq_domain *d, unsigned int irq,
+	irq_hw_number_t hwirq)
+{
+	struct gpio_chip *gc = d->host_data;
+
+	irq_domain_set_info(d, irq, hwirq, gc->irqchip, d->host_data,
+		gc->irq_handler, NULL, NULL);
+
+	if (gc->can_sleep && !gc->irq_not_threaded)
+		irq_set_nested_thread(irq, 1);
+
+	irq_set_noprobe(irq);
+}
+
+static int msm_gpio_domain_translate(struct irq_domain *d,
+	struct irq_fwspec *fwspec, unsigned long *hwirq, unsigned int *type)
+{
+	if (is_of_node(fwspec->fwnode)) {
+		if (fwspec->param_count < 2)
+			return -EINVAL;
+
+		*hwirq = fwspec->param[0];
+		*type = fwspec->param[1] & IRQ_TYPE_SENSE_MASK;
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
+static int msm_gpio_domain_alloc(struct irq_domain *domain, unsigned int virq,
+                                unsigned int nr_irqs, void *arg)
+{
+	int i, ret;
+	irq_hw_number_t hwirq;
+	unsigned int type = IRQ_TYPE_NONE;
+	struct irq_fwspec *fwspec = arg;
+	struct irq_fwspec parent_fwspec;
+
+	ret = msm_gpio_domain_translate(domain, fwspec, &hwirq, &type);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < nr_irqs; i++)
+		msm_gpio_domain_map(domain, virq + i, hwirq + i);
+
+	parent_fwspec = *fwspec;
+	parent_fwspec.fwnode = domain->parent->fwnode;
+	return irq_domain_alloc_irqs_parent(domain, virq, nr_irqs,
+&parent_fwspec);
+}
+
+static const struct irq_domain_ops msm_gpio_domain_ops = {
+	.translate	= msm_gpio_domain_translate,
+	.alloc		= msm_gpio_domain_alloc,
+	.free		= irq_domain_free_irqs_top,
 };
 
 static void msm_gpio_irq_handler(struct irq_desc *desc)
@@ -782,11 +874,20 @@ static void msm_gpio_irq_handler(struct irq_desc *desc)
 	chained_irq_exit(chip, desc);
 }
 
+
+static int msm_gpiochip_to_irq(struct gpio_chip *chip, unsigned offset)
+{
+	return irq_find_mapping(chip->irqdomain, offset);
+}
+
 static int msm_gpio_init(struct msm_pinctrl *pctrl)
 {
 	struct gpio_chip *chip;
 	int ret;
 	unsigned ngpio = pctrl->soc->ngpios;
+	struct device_node *mpm_parent = NULL;
+	struct irq_domain *domain_parent;
+	struct irq_fwspec fwspec;
 
 	if (WARN_ON(ngpio > MAX_NR_GPIO))
 		return -EINVAL;
@@ -812,19 +913,51 @@ static int msm_gpio_init(struct msm_pinctrl *pctrl)
 		return ret;
 	}
 
-	ret = gpiochip_irqchip_add(chip,
-				   &msm_gpio_irq_chip,
-				   0,
-				   handle_edge_irq,
-				   IRQ_TYPE_NONE);
-	if (ret) {
-		dev_err(pctrl->dev, "Failed to add irqchip to gpiochip\n");
-		gpiochip_remove(&pctrl->chip);
-		return -ENOSYS;
-	}
+	mpm_parent = of_irq_find_parent(chip->of_node);
+	if (of_device_is_compatible(mpm_parent, "qcom,mpm-gpio")) {
+		chip->irqchip = &msm_gpio_irq_chip;
+		chip->irq_handler = handle_edge_irq;
+		chip->irq_default_type = IRQ_TYPE_NONE;
+		chip->to_irq = msm_gpiochip_to_irq;
+		chip->lock_key = NULL;
+		domain_parent = irq_find_host(mpm_parent);
+		if (!domain_parent) {
+			pr_err("unable to find parent domain\n");
+			gpiochip_remove(&pctrl->chip);
+			return -ENXIO;
+		}
+		chip->irqdomain = irq_domain_add_hierarchy(domain_parent, 0, chip->ngpio,
+				chip->of_node, &msm_gpio_domain_ops, chip);
+		
+		if (!chip->irqdomain) {
+			dev_err(pctrl->dev, "Failed to add irqchip to gpiochip\n");
+			chip->irqchip = NULL;
+		}
 
-	gpiochip_set_chained_irqchip(chip, &msm_gpio_irq_chip, pctrl->irq,
-				     msm_gpio_irq_handler);
+		fwspec.fwnode = of_node_to_fwnode(chip->of_node);
+		fwspec.param_count = 2;
+		fwspec.param[0] = 0;
+		fwspec.param[1] = 0;
+		chip->irq_base = irq_domain_alloc_irqs(chip->irqdomain,
+chip->ngpio, 0, &fwspec);
+
+		gpiochip_set_chained_irqchip(chip, &msm_gpio_irq_chip, pctrl->irq,
+					     msm_gpio_irq_handler);
+	} else {
+		ret = gpiochip_irqchip_add(chip,
+					   &msm_gpio_irq_chip,
+					   0,
+					   handle_edge_irq,
+					   IRQ_TYPE_NONE);
+		if (ret) {
+			dev_err(pctrl->dev, "Failed to add irqchip to gpiochip\n");
+			gpiochip_remove(&pctrl->chip);
+			return -ENOSYS;
+		}
+
+		gpiochip_set_chained_irqchip(chip, &msm_gpio_irq_chip, pctrl->irq,
+					     msm_gpio_irq_handler);
+	}
 
 	return 0;
 }
