@@ -8,7 +8,7 @@
 / {
 	model = "Qualcomm APQ 8084";
 	compatible = "qcom,apq8084";
-	interrupt-parent = <&intc>;
+	interrupt-parent = <&wakegic>;
 
 	reserved-memory {
 		#address-cells = <1>;
@@ -109,6 +109,26 @@
 		hwlocks = <&tcsr_mutex 3>;
 	};
 
+	mpm {
+		compatible = "qcom,mpm-apq8084";
+		interrupts = <0 171 1>;
+		qcom,ipc = <&apcs 8 1>;
+		qcom,rpm-msg-ram = <&rpm_msg_ram>;
+
+		wakegpio: wake-gpio {
+			compatible = "qcom,mpm-gpio", "qcom,mpm-gpio-apq8084";
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
+
+		wakegic: wake-gic {
+			compatible = "qcom,mpm-gic", "qcom,mpm-gic-apq8084";
+			interrupt-controller;
+			#interrupt-cells = <3>;
+			interrupt-parent = <&intc>;
+		};
+	};
+
 	soc: soc {
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -121,6 +141,8 @@
 			#interrupt-cells = <3>;
 			reg = <0xf9000000 0x1000>,
 			      <0xf9002000 0x1000>;
+
+			interrupt-parent = <&intc>;
 		};
 
 		apcs: syscon@f9011000 {
