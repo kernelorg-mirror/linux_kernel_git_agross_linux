@@ -19,7 +19,7 @@
 	model = "Qualcomm Technologies, Inc. MSM8916";
 	compatible = "qcom,msm8916";
 
-	interrupt-parent = <&intc>;
+	interrupt-parent = <&wakegic>;
 
 	#address-cells = <2>;
 	#size-cells = <2>;
@@ -113,6 +113,26 @@
 		hwlocks = <&tcsr_mutex 3>;
 	};
 
+	mpm {
+		compatible = "qcom,mpm-msm8916";
+		interrupts = <GIC_SPI 171 IRQ_TYPE_EDGE_RISING>;
+		qcom,ipc = <&apcs 8 1>;
+		qcom,rpm-msg-ram = <&rpm_msg_ram>;
+
+		wakegpio: wake-gpio {
+			compatible = "qcom,mpm-gpio", "qcom,mpm-gpio-msm8916";
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
+
+		wakegic: wake-gic {
+			compatible = "qcom,mpm-gic", "qcom,mpm-gic-msm8916";
+			interrupt-controller;
+			#interrupt-cells = <3>;
+			interrupt-parent = <&intc>;
+		};
+	};
+
 	soc: soc {
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -127,11 +147,12 @@
 		msmgpio: pinctrl@1000000 {
 			compatible = "qcom,msm8916-pinctrl";
 			reg = <0x1000000 0x300000>;
-			interrupts = <GIC_SPI 208 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts-extended = <&wakegic GIC_SPI 208 IRQ_TYPE_LEVEL_HIGH>;
 			gpio-controller;
 			#gpio-cells = <2>;
 			interrupt-controller;
 			#interrupt-cells = <2>;
+			interrupt-parent = <&wakegpio>;
 		};
 
 		gcc: qcom,gcc@1800000 {
@@ -416,6 +437,8 @@
 			interrupt-controller;
 			#interrupt-cells = <3>;
 			reg = <0x0b000000 0x1000>, <0x0b002000 0x1000>;
+
+			interrupt-parent = <&intc>;
 		};
 
 		timer@b020000 {
