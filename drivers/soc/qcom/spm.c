@@ -25,6 +25,12 @@
 #include <linux/cpuidle.h>
 #include <linux/cpu_pm.h>
 #include <linux/qcom_scm.h>
+#include <linux/cpu.h>
+#include <linux/smp.h>
+#include <linux/sched.h>
+#include <linux/suspend.h>
+#include <linux/clocksource.h>
+#include <linux/nmi.h>
 
 #include <asm/cpuidle.h>
 #include <asm/proc-fns.h>
@@ -197,6 +203,18 @@ static int qcom_cpu_spc(void)
 	return ret;
 }
 
+static void qcom_enter_freeze(struct cpuidle_device *dev,
+	struct cpuidle_driver *drv, int index)
+{
+	local_fiq_disable();
+//lockup_detector_suspend();
+	qcom_cpu_spc();
+//touch_softlockup_watchdog();
+
+//lockup_detector_resume();
+	local_fiq_enable();
+}
+
 static int qcom_idle_enter(unsigned long index)
 {
 	return __this_cpu_read(qcom_idle_ops)[index]();
@@ -217,6 +235,7 @@ static int __init qcom_cpuidle_init(struct device_node *cpu_node, int cpu)
 	idle_fn *fns;
 	cpumask_t mask;
 	bool use_scm_power_down = false;
+	struct cpuidle_driver *cpu_drv = cpuidle_get_driver();
 
 	for (i = 0; ; i++) {
 		state_node = of_parse_phandle(cpu_node, "cpu-idle-states", i);
@@ -239,8 +258,12 @@ static int __init qcom_cpuidle_init(struct device_node *cpu_node, int cpu)
 		idle_fns[state_count] = match_id->data;
 
 		/* Check if any of the states allow power down */
-		if (match_id->data == qcom_cpu_spc)
+		if (match_id->data == qcom_cpu_spc) {
 			use_scm_power_down = true;
+			cpu_drv->states[state_count].enter_freeze = qcom_enter_freeze;
+//			cpu_drv->states[state_count].flags |=
+//CPUIDLE_FLAG_TIMER_STOP;
+		}
 
 		state_count++;
 	}
@@ -311,6 +334,15 @@ static struct spm_driver_data *spm_get_drv(struct platform_device *pdev,
 	return drv;
 }
 
+static int qcom_suspend_freeze_only(suspend_state_t state)
+{
+	return state == PM_SUSPEND_FREEZE;
+}
+
+static const struct platform_suspend_ops qcom_suspend_ops = {
+	.valid          = qcom_suspend_freeze_only,
+};
+
 static const struct of_device_id spm_match_table[] = {
 	{ .compatible = "qcom,msm8974-saw2-v2.1-cpu",
 	  .data = &spm_reg_8974_8084_cpu },
@@ -367,6 +399,8 @@ static int spm_dev_probe(struct platform_device *pdev)
 	spm_set_low_power_mode(drv, PM_SLEEP_MODE_STBY);
 
 	per_cpu(cpu_spm_drv, cpu) = drv;
+
+	suspend_set_ops(&qcom_suspend_ops);
 
 	return 0;
 }
