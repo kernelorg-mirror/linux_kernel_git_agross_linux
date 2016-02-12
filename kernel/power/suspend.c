@@ -29,6 +29,7 @@
 #include <trace/events/power.h>
 #include <linux/compiler.h>
 #include <linux/moduleparam.h>
+#include <linux/nmi.h>
 
 #include "power.h"
 
@@ -66,6 +67,7 @@ static void freeze_enter(void)
 	suspend_freeze_state = FREEZE_STATE_ENTER;
 	spin_unlock_irq(&suspend_freeze_lock);
 
+	lockup_detector_suspend();
 	get_online_cpus();
 	cpuidle_resume();
 
@@ -79,6 +81,7 @@ static void freeze_enter(void)
 
 	cpuidle_pause();
 	put_online_cpus();
+	lockup_detector_resume();
 
 	spin_lock_irq(&suspend_freeze_lock);
 
