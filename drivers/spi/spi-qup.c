@@ -129,6 +129,8 @@
 #define SPI_DELAY_THRESHOLD		1
 #define SPI_DELAY_RETRY			10
 
+#define QUP_DEBUG 0
+
 struct spi_qup {
 	void __iomem		*base;
 	struct device		*dev;
@@ -521,6 +523,18 @@ static irqreturn_t spi_qup_qup_irq(int irq, void *dev_id)
 		return IRQ_HANDLED;
 	}
 
+#if QUP_DEBUG
+dev_err(controller->dev, "irq: %s %s %s %s %s %s %s %d %d %d\n",
+	((controller->use_dma) ? "DMA" : "PIO"),
+	((opflags & QUP_OP_IN_SERVICE_FLAG) ? "IS" : "  "),
+	((opflags & QUP_OP_IN_BLOCK_READ_REQ) ? "IB" : "  "),
+	((opflags & QUP_OP_MAX_INPUT_DONE_FLAG) ? "ID" : "  "),
+	((opflags & QUP_OP_OUT_SERVICE_FLAG) ? "OS" : "  "),
+	((opflags & QUP_OP_OUT_BLOCK_WRITE_REQ) ? "OB" : "  "),
+	((opflags & QUP_OP_MAX_OUTPUT_DONE_FLAG) ? "OD" : "  "),
+	xfer->len, controller->tx_bytes, controller->rx_bytes);
+#endif
+
 	if (qup_err) {
 		if (qup_err & QUP_ERROR_OUTPUT_OVER_RUN)
 			dev_warn(controller->dev, "OUTPUT_OVER_RUN\n");
@@ -746,6 +760,9 @@ static int spi_qup_transfer_one(struct spi_master *master,
 	unsigned long timeout, flags;
 	int ret = -EIO;
 
+#if QUP_DEBUG
+	dev_err(controller->dev, ">>>>\n");
+#endif
 	ret = spi_qup_io_config(spi, xfer);
 	if (ret)
 		return ret;
@@ -783,6 +800,9 @@ exit:
 	if (ret && controller->use_dma)
 		spi_qup_dma_terminate(master, xfer);
 
+#if QUP_DEBUG
+	dev_err(controller->dev, "<<<<\n");
+#endif
 	return ret;
 }
 
