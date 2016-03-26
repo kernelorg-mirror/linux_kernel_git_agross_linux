@@ -407,43 +407,31 @@
 			status = "disabled";
 		};
 
-		usb_dev: usb@78d9000 {
+		usb@78d9000 {
 			compatible = "qcom,ci-hdrc";
 			reg = <0x78d9000 0x400>;
-			dr_mode = "peripheral";
+			dr_mode = "otg";
 			interrupts = <GIC_SPI 134 IRQ_TYPE_NONE>;
 			usb-phy = <&usb_otg>;
-			status = "disabled";
-		};
 
-		usb_host: ehci@78d9000 {
-			compatible = "qcom,ehci-host";
-			reg = <0x78d9000 0x400>;
-			interrupts = <GIC_SPI 134 IRQ_TYPE_NONE>;
-			usb-phy = <&usb_otg>;
+			clocks = <&gcc GCC_USB_HS_AHB_CLK>,
+				 <&gcc GCC_USB_HS_SYSTEM_CLK>;
+			clock-names = "iface", "core";
+
 			status = "disabled";
 		};
 
 		usb_otg: phy@78d9000 {
-			compatible = "qcom,usb-otg-snps";
+			compatible = "qcom,usb-8x16-phy";
 			reg = <0x78d9000 0x400>;
-			interrupts = <GIC_SPI 134 IRQ_TYPE_EDGE_BOTH>,
-				     <GIC_SPI 140 IRQ_TYPE_EDGE_RISING>;
-
-			qcom,vdd-levels = <500000 1000000 1320000>;
-			qcom,phy-init-sequence = <0x44 0x6B 0x24 0x13>;
-			dr_mode = "peripheral";
-			qcom,otg-control = <2>; // PMIC
-			qcom,manual-pullup;
 
 			clocks = <&gcc GCC_USB_HS_AHB_CLK>,
-				 <&gcc GCC_USB_HS_SYSTEM_CLK>,
-				 <&gcc GCC_USB2A_PHY_SLEEP_CLK>;
-			clock-names = "iface", "core", "sleep";
+				 <&gcc GCC_USB_HS_SYSTEM_CLK>;
+			clock-names = "iface", "core";
 
-			resets = <&gcc GCC_USB2A_PHY_BCR>,
-				 <&gcc GCC_USB_HS_BCR>;
-			reset-names = "phy", "link";
+			resets = <&gcc GCC_USB2A_PHY_BCR>;
+			reset-names = "phy";
+
 			status = "disabled";
 		};
 
@@ -562,7 +550,6 @@
 					pm8916_s1: s1 {};
 					pm8916_s3: s3 {};
 					pm8916_s4: s4 {};
-
 					pm8916_l1: l1 {};
 					pm8916_l2: l2 {};
 					pm8916_l3: l3 {};
