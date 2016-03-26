@@ -431,6 +431,8 @@ u8 hw_port_test_get(struct ci_hdrc *ci);
 int hw_wait_reg(struct ci_hdrc *ci, enum ci_hw_regs reg, u32 mask,
 				u32 value, unsigned int timeout_ms);
 
+void hw_phymode_configure(struct ci_hdrc *ci);
+
 void ci_platform_configure(struct ci_hdrc *ci);
 
 int dbg_create_files(struct ci_hdrc *ci);
