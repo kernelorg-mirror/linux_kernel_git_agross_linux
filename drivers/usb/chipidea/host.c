@@ -189,6 +189,8 @@ static void host_stop(struct ci_hdrc *ci)
 		if (ci->platdata->reg_vbus && !ci_otg_is_fsm_mode(ci) &&
 			(ci->platdata->flags & CI_HDRC_TURN_VBUS_EARLY_ON))
 				regulator_disable(ci->platdata->reg_vbus);
+
+		hw_phymode_configure(ci);
 	}
 	ci->hcd = NULL;
 	ci->otg.host = NULL;
