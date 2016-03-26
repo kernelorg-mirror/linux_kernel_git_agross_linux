@@ -60,6 +60,7 @@
 #define HSPHY_VDD_MIN			5
 #define HSPHY_VDD_MAX			7
 
+
 struct phy_8x16 {
 	struct usb_phy			phy;
 	void __iomem			*regs;
@@ -67,7 +68,6 @@ struct phy_8x16 {
 	struct clk			*iface_clk;
 	struct regulator		*v3p3;
 	struct regulator		*v1p8;
-	struct regulator		*vdd;
 
 	struct reset_control		*phy_reset;
 
@@ -81,14 +81,6 @@ struct phy_8x16 {
 static int phy_8x16_regulators_enable(struct phy_8x16 *qphy)
 {
 	int ret;
-
-	ret = regulator_set_voltage(qphy->vdd, HSPHY_VDD_MIN, HSPHY_VDD_MAX);
-	if (ret)
-		return ret;
-
-	ret = regulator_enable(qphy->vdd);
-	if (ret)
-		return ret;
 
 	ret = regulator_set_voltage(qphy->v3p3, HSPHY_3P3_MIN, HSPHY_3P3_MAX);
 	if (ret)
@@ -111,7 +103,6 @@ static int phy_8x16_regulators_enable(struct phy_8x16 *qphy)
 off_3p3:
 	regulator_disable(qphy->v3p3);
 off_vdd:
-	regulator_disable(qphy->vdd);
 
 	return ret;
 }
@@ -120,7 +111,6 @@ static void phy_8x16_regulators_disable(struct phy_8x16 *qphy)
 {
 	regulator_disable(qphy->v1p8);
 	regulator_disable(qphy->v3p3);
-	regulator_disable(qphy->vdd);
 }
 
 static int phy_8x16_notify_connect(struct usb_phy *phy,
@@ -132,10 +122,16 @@ static int phy_8x16_notify_connect(struct usb_phy *phy,
 	val = ULPI_MISC_A_VBUSVLDEXTSEL | ULPI_MISC_A_VBUSVLDEXT;
 	usb_phy_io_write(&qphy->phy, val, ULPI_SET(ULPI_MISC_A));
 
+	val = readl(qphy->regs + HSPHY_GENCONFIG_2);
+	val |= BIT(7);
+	writel(val, qphy->regs + HSPHY_GENCONFIG_2);
+
 	val = readl(qphy->regs + HSPHY_USBCMD);
 	val |= HSPHY_SESS_VLD_CTRL;
 	writel(val, qphy->regs + HSPHY_USBCMD);
+	wmb();
 
+	udelay(1000);
 	return 0;
 }
 
@@ -152,16 +148,26 @@ static int phy_8x16_notify_disconnect(struct usb_phy *phy,
 	val &= ~HSPHY_SESS_VLD_CTRL;
 	writel(val, qphy->regs + HSPHY_USBCMD);
 
+	val = readl(qphy->regs + 0x184);
+	val &= 0xc0000000;
+	writel(val | 0x80000000, qphy->regs + 0x184);
+	wmb();
+
+	udelay(1000);
 	return 0;
 }
 
 static int phy_8x16_vbus_on(struct phy_8x16 *qphy)
 {
+	u32 val;
 	phy_8x16_notify_connect(&qphy->phy, USB_SPEED_UNKNOWN);
 
 	/* Switch D+/D- lines to Device connector */
 	gpiod_set_value_cansleep(qphy->switch_gpio, 0);
 
+	val = readl(qphy->regs + 0x184);
+	val &= 0xc0000000;
+	writel(val | 0x80000000, qphy->regs + 0x184);
 	return 0;
 }
 
@@ -261,7 +267,7 @@ static void phy_8x16_shutdown(struct usb_phy *phy)
 
 static int phy_8x16_read_devicetree(struct phy_8x16 *qphy)
 {
-	struct regulator_bulk_data regs[3];
+	struct regulator_bulk_data regs[2];
 	struct device *dev = qphy->phy.dev;
 	int ret;
 
@@ -275,7 +281,6 @@ static int phy_8x16_read_devicetree(struct phy_8x16 *qphy)
 
 	regs[0].supply = "v3p3";
 	regs[1].supply = "v1p8";
-	regs[2].supply = "vddcx";
 
 	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(regs), regs);
 	if (ret)
@@ -283,7 +288,6 @@ static int phy_8x16_read_devicetree(struct phy_8x16 *qphy)
 
 	qphy->v3p3 = regs[0].consumer;
 	qphy->v1p8 = regs[1].consumer;
-	qphy->vdd  = regs[2].consumer;
 
 	qphy->phy_reset = devm_reset_control_get(dev, "phy");
 	if (IS_ERR(qphy->phy_reset))
