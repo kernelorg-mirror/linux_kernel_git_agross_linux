@@ -13,6 +13,10 @@
 #include <linux/usb/ulpi.h>
 #include <linux/usb/gadget.h>
 #include <linux/usb/chipidea.h>
+#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
+#include <linux/dma-mapping.h>
+
 
 #include "ci.h"
 
@@ -57,6 +61,8 @@ static int ci_hdrc_msm_probe(struct platform_device *pdev)
 {
 	struct platform_device *plat_ci;
 	struct usb_phy *phy;
+	struct gpio_desc *hub_gpio;
+
 
 	dev_dbg(&pdev->dev, "ci_hdrc_msm_probe\n");
 
@@ -72,6 +78,12 @@ static int ci_hdrc_msm_probe(struct platform_device *pdev)
 		return PTR_ERR(phy);
 
 	ci_hdrc_msm_platdata.usb_phy = phy;
+
+	/* get hw switch output */
+	hub_gpio = devm_gpiod_get(&pdev->dev, "hub", GPIOD_OUT_LOW);
+	if (IS_ERR(hub_gpio))
+		return PTR_ERR(hub_gpio);
+	gpiod_set_value_cansleep(hub_gpio, 1);
 
 	plat_ci = ci_hdrc_add_device(&pdev->dev,
 				pdev->resource, pdev->num_resources,
