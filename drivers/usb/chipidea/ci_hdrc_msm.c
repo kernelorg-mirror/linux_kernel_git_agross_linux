@@ -8,6 +8,7 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/of_device.h>
 #include <linux/usb/msm_hsusb_hw.h>
 #include <linux/usb/ulpi.h>
 #include <linux/usb/gadget.h>
@@ -58,6 +59,8 @@ static int ci_hdrc_msm_probe(struct platform_device *pdev)
 	struct usb_phy *phy;
 
 	dev_dbg(&pdev->dev, "ci_hdrc_msm_probe\n");
+
+	dma_coerce_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 
 	/*
 	 * OTG(PHY) driver takes care of PHY initialization, clock management,
