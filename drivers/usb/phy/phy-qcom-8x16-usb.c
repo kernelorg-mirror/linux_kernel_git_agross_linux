@@ -125,6 +125,7 @@ static int phy_8x16_notify_connect(struct usb_phy *phy,
 	val = readl(qphy->regs + HSPHY_GENCONFIG_2);
 	val |= BIT(7);
 	writel(val, qphy->regs + HSPHY_GENCONFIG_2);
+	wmb();
 
 	val = readl(qphy->regs + HSPHY_USBCMD);
 	val |= HSPHY_SESS_VLD_CTRL;
@@ -132,6 +133,7 @@ static int phy_8x16_notify_connect(struct usb_phy *phy,
 	wmb();
 
 	udelay(1000);
+
 	return 0;
 }
 
@@ -147,6 +149,7 @@ static int phy_8x16_notify_disconnect(struct usb_phy *phy,
 	val = readl(qphy->regs + HSPHY_USBCMD);
 	val &= ~HSPHY_SESS_VLD_CTRL;
 	writel(val, qphy->regs + HSPHY_USBCMD);
+	wmb();
 
 	val = readl(qphy->regs + 0x184);
 	val &= 0xc0000000;
@@ -168,6 +171,7 @@ static int phy_8x16_vbus_on(struct phy_8x16 *qphy)
 	val = readl(qphy->regs + 0x184);
 	val &= 0xc0000000;
 	writel(val | 0x80000000, qphy->regs + 0x184);
+	wmb();
 	return 0;
 }
 
