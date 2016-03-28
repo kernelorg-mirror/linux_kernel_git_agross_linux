@@ -55,6 +55,7 @@ static struct ci_hdrc_platform_data ci_hdrc_msm_platdata = {
 				  CI_HDRC_DISABLE_STREAMING,
 
 	.notify_event		= ci_hdrc_msm_notify_event,
+	.phy_mode		= USBPHY_INTERFACE_MODE_ULPI,
 };
 
 static int ci_hdrc_msm_probe(struct platform_device *pdev)
