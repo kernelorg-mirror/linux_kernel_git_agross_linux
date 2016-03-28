@@ -190,6 +190,7 @@ static void host_stop(struct ci_hdrc *ci)
 			(ci->platdata->flags & CI_HDRC_TURN_VBUS_EARLY_ON))
 				regulator_disable(ci->platdata->reg_vbus);
 
+		hw_device_reset(ci);
 		hw_phymode_configure(ci);
 	}
 	ci->hcd = NULL;
