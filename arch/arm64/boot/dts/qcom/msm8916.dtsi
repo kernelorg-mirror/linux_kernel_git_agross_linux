@@ -563,6 +563,10 @@
 		};
 	};
 
+	pm {
+		compatible = "qcom,pm-msm8916";
+	};
+
 	smd {
 		compatible = "qcom,smd";
 
