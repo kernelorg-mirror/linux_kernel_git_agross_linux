@@ -1,0 +1,3 @@
+comment "Qualcomm V4L2 drivers"
+
+source "drivers/media/platform/qcom/vidc/Kconfig"

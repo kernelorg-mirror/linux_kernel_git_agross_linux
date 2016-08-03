@@ -1,0 +1,61 @@
+* Qualcomm video encoder/decoder accelerator
+
+- compatible:
+	Usage: required
+	Value type: <stringlist>
+	Definition: Value should contain
+			- "qcom,vidc-msm8916"
+			- "qcom,vidc-msm8996"
+- reg:
+	Usage: required
+	Value type: <prop-encoded-array>
+	Definition: Register ranges as listed in the reg-names property
+
+- interrupts:
+	Usage: required
+	Value type: <prop-encoded-array>
+	Definition:
+
+- power-domains:
+	Usage: required
+	Value type: <prop-encoded-array>
+	Definition: A phandle and power domain specifier pairs to the
+		    power domain which is responsible for collapsing
+		    and restoring power to the peripheral
+
+- clocks:
+	Usage: required
+	Value type: <prop-encoded-array>
+	Definition: List of phandle and clock specifier pairs as listed
+		    in clock-names property
+- clock-names:
+	Usage: required
+	Value type: <stringlist>
+	Definition: Should contain the following entries
+			- "core"  Core video accelerator clock
+			- "iface" Video accelerator AHB clock
+			- "bus"	  Video accelerator AXI clock
+- rproc:
+	Usage: required
+	Value type: <prop-encoded-array>
+	Definition: A phandle to remote processor responsible for
+		    firmware loading
+
+- iommus:
+	Usage: required
+	Value type: <prop-encoded-array>
+	Definition: A list of phandle and IOMMU specifier pairs
+
+* An Example
+	qcom,vidc@1d00000 {
+		compatible = "qcom,vidc-msm8916";
+		reg = <0x01d00000 0xff000>;
+		clocks = <&gcc GCC_VENUS0_VCODEC0_CLK>,
+			 <&gcc GCC_VENUS0_AHB_CLK>,
+			 <&gcc GCC_VENUS0_AXI_CLK>;
+		clock-names = "core", "iface", "bus";
+		interrupts = <GIC_SPI 44 0>;
+		power-domains = <&gcc VENUS_GDSC>;
+		rproc = <&vidc_rproc>;
+		iommus = <&apps_iommu 5>;
+	};
