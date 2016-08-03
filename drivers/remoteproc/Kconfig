@@ -91,6 +91,16 @@ config QCOM_Q6V5_PIL
 	  Say y here to support the Qualcomm Peripherial Image Loader for the
 	  Hexagon V5 based remote processors.
 
+config QCOM_VENUS_PIL
+	tristate "Qualcomm Venus Peripheral Image Loader"
+	depends on OF && ARCH_QCOM
+	depends on QCOM_SCM
+	select QCOM_MDT_LOADER
+	select REMOTEPROC
+	help
+	  Say y here to support Qualcomm Peripherial Image Loader for the
+	  Venus remote processor.
+
 config ST_REMOTEPROC
 	tristate "ST remoteproc support"
 	depends on ARCH_STI
