@@ -375,7 +375,8 @@ static int __init hidma_mgmt_of_populate_channels(struct device_node *np)
 			ret = PTR_ERR(new_pdev);
 			goto out;
 		}
-		of_dma_configure(&new_pdev->dev, child);
+		of_dma_configure_masks(&new_pdev->dev, child);
+		of_dma_configure_ops(&new_pdev->dev, child);
 
 		kfree(res);
 		res = NULL;
