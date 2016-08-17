@@ -17,6 +17,7 @@
 #include <linux/ioctl.h>
 #include <linux/list.h>
 #include <linux/module.h>
+#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/types.h>
@@ -346,7 +347,6 @@ MODULE_DEVICE_TABLE(of, vidc_dt_match);
 static int vidc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	const struct of_device_id *match;
 	struct vidc_core *core;
 	struct device_node *rproc;
 	struct resource *r;
@@ -378,11 +378,9 @@ static int vidc_probe(struct platform_device *pdev)
 	if (core->irq < 0)
 		return core->irq;
 
-	match = of_match_node(vidc_dt_match, dev->of_node);
-	if (!match->data)
+	core->res = of_device_get_match_data(dev);
+	if (!core->res)
 		return -ENODEV;
-
-	core->res = match->data;
 
 	ret = vidc_clks_get(core, core->res->clks_num, core->res->clks);
 	if (ret)
