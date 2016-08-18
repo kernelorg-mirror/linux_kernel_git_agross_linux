@@ -20,6 +20,7 @@
 #include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
+#include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <linux/qcom_scm.h>
 #include <linux/remoteproc.h>
@@ -48,15 +49,11 @@ static int venus_load(struct rproc *rproc, const struct firmware *fw)
 	bool relocate;
 	int ret;
 
-	memcpy_toio(venus->mem_region, fw->data, fw->size);
-
-	ret = qcom_scm_pas_init_image(VENUS_PAS_ID, venus->mem_phys, fw->size);
+	ret = qcom_scm_pas_init_image(VENUS_PAS_ID, fw->data, fw->size);
 	if (ret) {
 		dev_err(&rproc->dev, "invalid firmware metadata (%d)\n", ret);
 		return -EINVAL;
 	}
-
-	memset(venus->mem_region, 0, fw->size);
 
 	ret = qcom_mdt_parse(fw, &fw_addr, &fw_size, &relocate);
 	if (ret) {
@@ -65,6 +62,8 @@ static int venus_load(struct rproc *rproc, const struct firmware *fw)
 	}
 
 	venus->fw_addr = fw_addr;
+
+	dev_err(&rproc->dev, "whole fw size is %zu\n", fw_size);
 
 	ret = qcom_scm_pas_mem_setup(VENUS_PAS_ID,
 				     relocate ? venus->mem_phys : fw_addr,
@@ -112,7 +111,7 @@ static int venus_stop(struct rproc *rproc)
 static void *venus_da_to_va(struct rproc *rproc, u64 da, int len)
 {
 	struct qcom_venus *venus = rproc->priv;
-	u64 offset;
+	s64 offset;
 
 	offset = da - venus->fw_addr;
 
@@ -128,140 +127,84 @@ static const struct rproc_ops venus_ops = {
 	.da_to_va = venus_da_to_va,
 };
 
-static int venus_alloc_memory_region(struct qcom_venus *venus)
+static int venus_iommu_sec_ptbl_init(struct qcom_venus *venus)
 {
-	struct device_node *node;
-	struct resource r;
-	int ret;
-
-	node = of_parse_phandle(venus->dev->of_node, "memory-region", 0);
-	if (!node) {
-		dev_err(venus->dev, "no memory-region specified\n");
-		return -EINVAL;
-	}
-
-	ret = of_address_to_resource(node, 0, &r);
-	if (ret)
-		return ret;
-
-	venus->mem_phys = r.start;
-	venus->mem_size = resource_size(&r);
-	venus->mem_region = devm_ioremap_wc(venus->dev, venus->mem_phys,
-					    venus->mem_size);
-	if (!venus->mem_region) {
-		dev_err(venus->dev, "unable to map memory region: %pa+%zx\n",
-			&r.start, venus->mem_size);
-		return -EBUSY;
-	}
-
-	return 0;
-}
-
-#define SCM_SVC_MP		0xc
-#define MAXIMUM_VIRT_SIZE	(300 * SZ_1M)
-#define MAKE_VERSION(major, minor, patch) \
-	(((major & 0x3FF) << 22) | ((minor & 0x3FF) << 12) | (patch & 0xFFF))
-
-static int venus_iommu_sec_ptbl_init(struct device *dev)
-{
-	int psize[2] = {0, 0};
-	int version;
-	void *cpu_addr;
+	struct device *dev = venus->dev;
+	size_t size = 0;
 	dma_addr_t paddr;
-	unsigned long attrs;
-	static bool allocated = false;
 	int ret;
 
-	if (allocated)
-		return 0;
-
-	version = qcom_scm_get_feat_version(SCM_SVC_MP);
-
-	if (version >= MAKE_VERSION(1, 1, 1)) {
-		ret = qcom_scm_iommu_set_cp_pool_size(MAXIMUM_VIRT_SIZE, 0);
-		if (ret) {
-			dev_err(dev, "failed setting max virtual size (%d)\n",
-				ret);
-			return ret;
-		}
-	}
-
-	ret = qcom_scm_iommu_secure_ptbl_size(0, psize);
+	ret = qcom_scm_iommu_secure_ptbl_size(0, &size);
 	if (ret) {
 		dev_err(dev, "failed to get iommu secure pgtable size (%d)\n",
 			ret);
 		return ret;
 	}
 
-	if (psize[1]) {
-		dev_err(dev, "failed to get iommu secure pgtable size (%d)\n",
-			ret);
-		return psize[1];
-	}
+	paddr = venus->mem_phys + 0x600000;
 
-	dev_info(dev, "iommu sec: pgtable size: %d\n", psize[0]);
+	dev_info(dev, "pgtable: pa:%pa, size:%zu, ret:%d\n", &paddr,
+		 size, ret);
 
-	attrs = DMA_ATTR_NO_KERNEL_MAPPING;
-
-	cpu_addr = dma_alloc_attrs(dev, psize[0], &paddr, GFP_KERNEL, attrs);
-	if (!cpu_addr) {
-		dev_err(dev, "failed to allocate %d bytes for pgtable\n",
-			psize[0]);
-		return -ENOMEM;
-	}
-
-	ret = qcom_scm_iommu_secure_ptbl_init(paddr, psize[0], 0);
+	ret = qcom_scm_iommu_secure_ptbl_init(paddr, size, 0);
 	if (ret) {
 		dev_err(dev, "failed to init iommu pgtable (%d)\n", ret);
-		goto free_mem;
+		return ret;
 	}
 
-	allocated = true;
-
 	return 0;
-
-free_mem:
-	dma_free_attrs(dev, psize[0], cpu_addr, paddr, attrs);
-	return ret;
 }
 
 static int venus_probe(struct platform_device *pdev)
 {
+	struct device *dev = &pdev->dev;
 	struct qcom_venus *venus;
+	ssize_t size = 0x600000;
+	dma_addr_t dma_handle;
 	struct rproc *rproc;
+	void *va;
 	int ret;
-
-	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
-	if (ret)
-		return ret;
 
 	if (!qcom_scm_is_available())
 		return -EPROBE_DEFER;
 
 	if (!qcom_scm_pas_supported(VENUS_PAS_ID)) {
-		dev_err(&pdev->dev, "PAS is not available for venus\n");
+		dev_err(dev, "PAS is not available for venus\n");
 		return -ENXIO;
 	}
 
-	rproc = rproc_alloc(&pdev->dev, pdev->name, &venus_ops,
-			    VENUS_FIRMWARE_NAME, sizeof(*venus));
+	ret = of_reserved_mem_device_init(dev);
+	if (ret)
+		return ret;
+
+	rproc = rproc_alloc(dev, pdev->name, &venus_ops, VENUS_FIRMWARE_NAME,
+			    sizeof(*venus));
 	if (!rproc) {
-		dev_err(&pdev->dev, "unable to allocate remoteproc\n");
+		dev_err(dev, "unable to allocate remoteproc\n");
 		return -ENOMEM;
 	}
 
 	rproc->fw_ops = &venus_fw_ops;
 
 	venus = rproc->priv;
-	venus->dev = &pdev->dev;
+	venus->dev = dev;
 	venus->rproc = rproc;
+
 	platform_set_drvdata(pdev, venus);
 
-	ret = venus_alloc_memory_region(venus);
-	if (ret)
-		goto free_rproc;
+	ret = dma_alloc_from_coherent(dev, size, &dma_handle, &va);
+	if (!ret) {
+		dev_err(dev, "dma alloc failed\n");
+		return -ENOMEM;
+	}
 
-	ret = venus_iommu_sec_ptbl_init(&pdev->dev);
+	dev_err(dev, "dma alloc %pa, %p, size %zu\n", &dma_handle, va, size);
+
+	venus->mem_phys = dma_handle;
+	venus->mem_size = size;
+	venus->mem_region = va;
+
+	ret = venus_iommu_sec_ptbl_init(venus);
 	if (ret)
 		goto free_rproc;
 
@@ -273,6 +216,9 @@ static int venus_probe(struct platform_device *pdev)
 
 free_rproc:
 	rproc_put(rproc);
+	dma_release_from_coherent(dev, get_order(venus->mem_size),
+				  venus->mem_region);
+	of_reserved_mem_device_release(&pdev->dev);
 
 	return ret;
 }
@@ -283,6 +229,9 @@ static int venus_remove(struct platform_device *pdev)
 
 	rproc_del(venus->rproc);
 	rproc_put(venus->rproc);
+	dma_release_from_coherent(&pdev->dev, get_order(venus->mem_size),
+				  venus->mem_region);
+	of_reserved_mem_device_release(&pdev->dev);
 
 	return 0;
 }
