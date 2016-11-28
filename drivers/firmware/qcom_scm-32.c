@@ -561,6 +561,11 @@ int __qcom_scm_pas_mss_reset(struct device *dev, bool reset)
 	return ret ? : le32_to_cpu(out);
 }
 
+int __qcom_scm_gpu_zap_resume(struct device *dev)
+{
+	return -ENOTSUPP;
+}
+
 int __qcom_scm_video_set_state(struct device *dev, u32 state, u32 spare)
 {
 	struct {
